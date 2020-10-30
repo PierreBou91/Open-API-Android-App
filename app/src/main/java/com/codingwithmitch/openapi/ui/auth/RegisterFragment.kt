@@ -8,8 +8,9 @@ import androidx.lifecycle.Observer
 import android.view.View
 import android.view.ViewGroup
 import com.codingwithmitch.openapi.R
-import com.codingwithmitch.openapi.util.GenericApiResponse
-import com.codingwithmitch.openapi.util.GenericApiResponse.*
+import com.codingwithmitch.openapi.ui.auth.state.RegistrationFields
+
+import kotlinx.android.synthetic.main.fragment_register.*
 
 class RegisterFragment : BaseAuthFragment() {
 
@@ -26,19 +27,29 @@ class RegisterFragment : BaseAuthFragment() {
 
         Log.d(TAG, "RegisterFragment: ${viewModel.hashCode()}")
 
-        viewModel.testRegister().observe(viewLifecycleOwner, Observer { response ->
-            when (response) {
-                is ApiSuccessResponse -> {
-                    Log.d(TAG, "REGISTRATION RESPONSE: ${response.body}")
-                }
-                is ApiErrorResponse -> {
-                    Log.d(TAG, "REGISTRATION RESPONSE: ${response.errorMessage}")
-                }
-                is ApiEmptyResponse -> {
-                    Log.d(TAG, "REGISTRATION RESPONSE: empty response")
-                }
+        subscribeObservers()
+    }
+
+    private fun subscribeObservers() {
+        viewModel.viewState.observe(viewLifecycleOwner, Observer { authViewState ->
+            authViewState.registrationFields?.let {registrationFields ->
+                registrationFields.registration_email?.let { input_email.setText(it) }
+                registrationFields.registration_username?.let { input_username.setText(it) }
+                registrationFields.registration_password?.let { input_password.setText(it) }
+                registrationFields.registration_confirm_password?.let { input_password_confirm.setText(it) }
             }
         })
     }
 
+    override fun onDestroyView() {
+        super.onDestroyView()
+        viewModel.setRegistrationFields(
+            RegistrationFields(
+                input_email.text.toString(),
+                input_username.text.toString(),
+                input_password.text.toString(),
+                input_password_confirm.text.toString()
+            )
+        )
+    }
 }
