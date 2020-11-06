@@ -16,6 +16,10 @@ class MainActivity : BaseActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        tool_bar.setOnClickListener {
+            sessionManager.logout()
+        }
+
         subscribeObservers()
     }
 
