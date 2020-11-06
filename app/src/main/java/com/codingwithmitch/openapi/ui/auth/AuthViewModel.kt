@@ -15,12 +15,14 @@ import com.codingwithmitch.openapi.ui.auth.state.LoginFields
 import com.codingwithmitch.openapi.ui.auth.state.RegistrationFields
 import com.codingwithmitch.openapi.util.AbsentLiveData
 import com.codingwithmitch.openapi.util.GenericApiResponse
+import kotlinx.coroutines.InternalCoroutinesApi
 import javax.inject.Inject
 
 class AuthViewModel
 @Inject
 constructor(val authRepository: AuthRepository) : BaseViewModel<AuthStateEvent, AuthViewState>() {
 
+    @InternalCoroutinesApi
     override fun handleStateEvent(stateEvent: AuthStateEvent): LiveData<DataState<AuthViewState>> {
         when (stateEvent) {
             is LoginAttenptEvent -> {
@@ -66,5 +68,14 @@ constructor(val authRepository: AuthRepository) : BaseViewModel<AuthStateEvent, 
 
     override fun initNewViewState(): AuthViewState {
         return AuthViewState()
+    }
+
+    fun cancelActiveJobs() {
+        authRepository.cancelActiveJobs()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        cancelActiveJobs()
     }
 }

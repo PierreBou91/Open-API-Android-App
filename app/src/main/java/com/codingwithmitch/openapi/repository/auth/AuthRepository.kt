@@ -1,5 +1,6 @@
 package com.codingwithmitch.openapi.repository.auth
 
+import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.switchMap
 import com.codingwithmitch.openapi.api.auth.OpenApiAuthService
@@ -8,14 +9,20 @@ import com.codingwithmitch.openapi.api.auth.network_responses.RegistrationRespon
 import com.codingwithmitch.openapi.models.AuthToken
 import com.codingwithmitch.openapi.persistence.AccountPropertiesDao
 import com.codingwithmitch.openapi.persistence.AuthTokenDao
+import com.codingwithmitch.openapi.repository.NetworkBoundResource
 import com.codingwithmitch.openapi.session.SessionManager
 import com.codingwithmitch.openapi.ui.DataState
 import com.codingwithmitch.openapi.ui.Response
 import com.codingwithmitch.openapi.ui.ResponseType
 import com.codingwithmitch.openapi.ui.auth.state.AuthViewState
+import com.codingwithmitch.openapi.ui.auth.state.LoginFields
+import com.codingwithmitch.openapi.ui.auth.state.RegistrationFields
 import com.codingwithmitch.openapi.util.ErrorHandling.Companion.ERROR_UNKNOWN
+import com.codingwithmitch.openapi.util.ErrorHandling.Companion.GENERIC_AUTH_ERROR
 import com.codingwithmitch.openapi.util.GenericApiResponse
 import com.codingwithmitch.openapi.util.GenericApiResponse.*
+import kotlinx.coroutines.InternalCoroutinesApi
+import kotlinx.coroutines.Job
 import javax.inject.Inject
 
 class AuthRepository
@@ -26,89 +33,111 @@ constructor(
     val openApiAuthService: OpenApiAuthService,
     val sessionManager: SessionManager
 ) {
+    private val TAG = "AppDebug"
+
+    private var repositoryJob: Job? = null
+
+    @InternalCoroutinesApi
     fun attemptLogin(email: String, password: String): LiveData<DataState<AuthViewState>> {
-        return openApiAuthService.login(email, password)
-            .switchMap { response ->
-                object: LiveData<DataState<AuthViewState>>() {
-                    override fun onActive() {
-                        super.onActive()
+        val loginFieldError = LoginFields(email, password).isValidForLogin()
 
-                        when(response) {
-                            is ApiSuccessResponse -> {
-                                value = DataState.data(
-                                    data = AuthViewState(
-                                        authToken = AuthToken(
-                                            response.body.pk,
-                                            response.body.token
-                                        )
-                                    ),
-                                    response = null
-                                )
-                            }
-                            is ApiErrorResponse -> {
-                                value = DataState.error(
-                                    response = Response(
-                                        message = response.errorMessage,
-                                        responseType = ResponseType.Dialog()
-                                    )
-                                )
-                            }
-                            is ApiEmptyResponse -> {
-                                value = DataState.error(
-                                    response = Response(
-                                        message = ERROR_UNKNOWN,
-                                        responseType = ResponseType.Dialog()
-                                    )
-                                )
-                            }
-                        }
-                    }
+        if (!loginFieldError.equals(LoginFields.LoginError.none())) {
+            return returnErrorResponse(loginFieldError, ResponseType.Dialog())
+        }
+        return object : NetworkBoundResource<LoginResponse, AuthViewState>(
+            sessionManager.isConnectedToTheInternet()
+        ) {
+            override suspend fun handleApiSuccessResponse(response: ApiSuccessResponse<LoginResponse>) {
+                Log.d(TAG, "handleApiSuccessResponse: $response")
+                //Incorrect Login credentials counts as a 200 resp from the server so we need to check that
+                if (response.body.response.equals(GENERIC_AUTH_ERROR)) {
+                    return onErrorReturn(response.body.errorMessage, true, false)
                 }
+                onCompleteJob(
+                    DataState.data(
+                        data = AuthViewState(
+                            authToken = AuthToken(response.body.pk, response.body.token)
+                        )
+                    )
+                )
             }
+
+            override fun createCall(): LiveData<GenericApiResponse<LoginResponse>> {
+                return openApiAuthService.login(email, password)
+            }
+
+            override fun setJob(job: Job) {
+                repositoryJob?.cancel()
+                repositoryJob = job
+            }
+
+        }.asLiveData()
     }
 
-    fun attemptRegistration(email: String,
-                            username: String,
-                            password: String,
-                            confirmPassword: String
+    @InternalCoroutinesApi
+    fun attemptRegistration(
+        email: String,
+        username: String,
+        password: String,
+        confirmPassword: String
     ): LiveData<DataState<AuthViewState>> {
-        return openApiAuthService.register(email, username, password, confirmPassword)
-            .switchMap { response ->
-                object: LiveData<DataState<AuthViewState>>() {
-                    override fun onActive() {
-                        super.onActive()
+        val registrationFieldErrors =
+            RegistrationFields(email, username, password, confirmPassword).isValidForRegistration()
+        if (registrationFieldErrors != RegistrationFields.RegistrationError.none()) {
+            return returnErrorResponse(registrationFieldErrors, ResponseType.Dialog())
+        }
 
-                        when(response) {
-                            is ApiSuccessResponse -> {
-                                value = DataState.data(
-                                    data = AuthViewState(
-                                        authToken = AuthToken(
-                                            response.body.pk,
-                                            response.body.token
-                                        )
-                                    ),
-                                    response = null
-                                )
-                            }
-                            is ApiErrorResponse -> {
-                                value = DataState.error(
-                                    response = Response(
-                                        message = response.errorMessage,
-                                        responseType = ResponseType.Dialog()
-                                    )
-                                )
-                            }
-                            is ApiEmptyResponse -> {
-                                value = DataState.error(
-                                    response = Response(
-                                        message = ERROR_UNKNOWN,
-                                        responseType = ResponseType.Dialog()
-                                    )
-                                )
-                            }
-                        }
-                    }
+        return object : NetworkBoundResource<RegistrationResponse, AuthViewState>(
+            sessionManager.isConnectedToTheInternet()
+        ) {
+            override suspend fun handleApiSuccessResponse(response: ApiSuccessResponse<RegistrationResponse>) {
+                Log.d(TAG, "handleApiSuccessResponse: $response")
+
+                if (response.body.response.equals(GENERIC_AUTH_ERROR)) {
+                    return onErrorReturn(response.body.errorMessage, true, false)
                 }
+                onCompleteJob(
+                    DataState.data(
+                        data = AuthViewState(
+                            authToken = AuthToken(response.body.pk, response.body.token)
+                        )
+                    )
+                )
             }
+
+            override fun createCall(): LiveData<GenericApiResponse<RegistrationResponse>> {
+                return openApiAuthService.register(email, username, password, confirmPassword)
+            }
+
+            override fun setJob(job: Job) {
+                repositoryJob?.cancel()
+                repositoryJob = job
+            }
+
+        }.asLiveData()
     }
+
+    private fun returnErrorResponse(
+        errorMessage: String,
+        responseType: ResponseType
+    ): LiveData<DataState<AuthViewState>> {
+        Log.d(TAG, "returnErrorResponse: $errorMessage")
+        return object : LiveData<DataState<AuthViewState>>() {
+            override fun onActive() {
+                super.onActive()
+                value = DataState.error(
+                    Response(
+                        errorMessage,
+                        responseType
+                    )
+                )
+            }
+        }
+    }
+
+    fun cancelActiveJobs() {
+        Log.d(TAG, "AuthRepository: Cancellling ongoing jobs...")
+        repositoryJob?.cancel()
+    }
+
 }
